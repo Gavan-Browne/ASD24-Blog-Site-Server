@@ -1,30 +1,71 @@
 const express = require("express");
 const bodyParser = require("body-parser");
+const passport = require("passport");
+const session = require("express-session");
+const mongoose = require("mongoose");
+const passportLocalMongoose = require("passport-local-mongoose");
+const MongoDBStore = require("connect-mongodb-session")(session);
 
 const PORT = 3000;
 app = express();
 app.use(bodyParser.urlencoded({ extended: true }));
 app.set("view-engine", "ejs");
 
+mongoose.connect("mongodb://localhost:27017/bestBlog");
+
+const Schema = mongoose.Schema;
+
+const userSchema = new Schema({
+  username: String,
+  email: String,
+});
+
+// Hash and salt passwords
+userSchema.plugin(passportLocalMongoose);
+// Helper db object
+const User = mongoose.model("User", userSchema);
+
+// Manage auth and cookies
+app.use(
+  session({
+    secret: "secret",
+    resave: false,
+    saveUninitialized: false,
+    store: new MongoDBStore({
+      mongoURL: "mongodb://localhost:27017",
+      collecton: "bestBlog",
+    }),
+  })
+);
+
+app.use(passport.initialize());
+app.use(passport.session());
+
+passport.serializeUser(User.serializeUser());
+passport.deserializeUser(User.deserializeUser());
+
+const LocalStrategy = require("passport-local").Strategy;
+
+passport.use(new LocalStrategy(User.authenticate));
+
 let blogPosts = [];
 let numPostsPerPage = 5;
 let numPagesToDisplay = 5;
 
 function makeDummyPosts(numPosts, blogPosts) {
-    for (let i=0; i<numPosts; i++) {
-        blogPosts.push({
-            author: "Author: " + i,
-            title: "test" + i,
-            content: "Text",
-            datetime: new Date().toLocaleString()
-        })
-    }
+  for (let i = 0; i < numPosts; i++) {
+    blogPosts.push({
+      author: "Author: " + i,
+      title: "test" + i,
+      content: "Text",
+      datetime: new Date().toLocaleString(),
+    });
+  }
 }
 makeDummyPosts(98, blogPosts);
 
-
 function getDisplayPosts(numPostsPerPage, pagenum, blogPosts) {
-    /*
+  /*
     pagenum = 1
     posts 0-4
 
@@ -35,46 +76,86 @@ function getDisplayPosts(numPostsPerPage, pagenum, blogPosts) {
     posts (10-1)*5 - 10*5-1
     45-49
     */
-   let start = (pagenum-1)*numPostsPerPage;
-   let end = pagenum*numPostsPerPage;
-   return blogPosts.slice().reverse().slice(start, end);
+  let start = (pagenum - 1) * numPostsPerPage;
+  let end = pagenum * numPostsPerPage;
+  return blogPosts.slice().reverse().slice(start, end);
 }
 
 app.get("/", (req, res) => {
-    // res.sendFile("index.html", {root: __dirname});
-    let pagenum;
-    if (!req.query.pagenum) pagenum = 1;
-    else pagenum = req.query.pagenum;
-    console.log(req.query.pagenum);
-    res.render("index.ejs", { 
-        blogPosts: getDisplayPosts(numPostsPerPage, pagenum, blogPosts),
-        numPages: Math.ceil(blogPosts.length/numPostsPerPage),
-        pagenum, // pagenum: pagenum
-        numPagesToDisplay
-    });
+  let pagenum;
+  if (!req.query.pagenum) {
+    pagenum = 1;
+  } else pagenum = req.query.pagenum;
+  console.log(req.query.pagenum);
+  res.render("index.ejs", {
+    blogPosts: getDisplayPosts(numPostsPerPage, pagenum, blogPosts),
+    numPages: Math.ceil(blogPosts.length / numPostsPerPage),
+    pagenum, // pagenum: pagenum
+    numPagesToDisplay,
+  });
 });
 
 // app.get('/page', (req, res) => {
 //     res.render("index.ejs");
 // });
 
-app.post('/new-blog-post', (req, res) => {
-    console.log(req.body.author);
-    console.log(req.body.title);
-    console.log(req.body.content);
-    console.log(new Date().toLocaleString());
-    blogPosts.push({
-        author: req.body.author,
-        title: req.body.title,
-        content: req.body.content,
-        datetime: new Date().toLocaleString()
-    })
-    res.redirect("/");
+app.post("/new-blog-post", (req, res) => {
+  console.log(req.body.author);
+  console.log(req.body.title);
+  console.log(req.body.content);
+  console.log(new Date().toLocaleString());
+  blogPosts.push({
+    author: req.body.author,
+    title: req.body.title,
+    content: req.body.content,
+    datetime: new Date().toLocaleString(),
+  });
+  res.redirect("/");
 });
 
+app.get("/create-account", (req, res) => {
+  if (req.isAuthenticated()) res.redirect("/?pagenum=1");
+  res.render("login.ejs");
+});
+
+app.post("/create-account", (req, res) => {
+  if (req.isAuthenticated()) res.redirect("/?pagenum=1");
+  User.register(
+    new User({
+      username: req.body.username,
+      email: req.body.email,
+    }),
+    "test-password",
+    (err, user) => {
+      if (err) {
+        console.log(err);
+      } else {
+        passport.authenticate("local", { failureRedirect: "/login" })(
+          req,
+          res,
+          () => {
+            res.redirect("/?pagenum=1");
+          }
+        );
+      }
+    }
+  );
+});
+
+app.get("/login", (req, res) => {
+  if (req.isAuthenticated()) res.redirect("/?pagenum=1");
+
+  res.render("login.ejs");
+});
+
+app.post(
+  "/login",
+  passport.authenticate("local", { failureRedirect: "/login" }),
+  (req, res) => {
+    res.redirect("/?pagenum=1");
+  }
+);
+
 app.listen(PORT, () => {
-    console.log(`Server is running on port: ${PORT}`);
-})
-
-
-
+  console.log(`Server is running on port: ${PORT}`);
+});
